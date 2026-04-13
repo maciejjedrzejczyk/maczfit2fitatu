@@ -21,6 +21,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .meal-card .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .5px; }
 .meal-card .macros { font-size: 12px; color: #555; margin-top: 4px; }
 .meal-card .macros span { margin-right: 8px; }
+.meal-card .actions { float: right; margin-top: -2px; }
+.meal-card .actions button { background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px 4px; border-radius: 4px; opacity: .5; }
+.meal-card .actions button:hover { opacity: 1; background: #f0f0f0; }
 .slot { margin-bottom: 12px; }
 .slot-header { font-size: 13px; font-weight: 600; text-transform: uppercase; color: #666; padding: 6px 0; border-bottom: 2px solid #eee; margin-bottom: 6px; display: flex; justify-content: space-between; }
 .slot-header .slot-total { font-weight: 400; color: #999; }
@@ -130,14 +133,37 @@ function renderFitatu() {
     zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
     zone.addEventListener('drop', async e => {
       e.preventDefault(); zone.classList.remove('drag-over');
-      const meal = JSON.parse(e.dataTransfer.getData('application/json'));
-      await syncMeal(slot, meal);
+      const raw = e.dataTransfer.getData('application/json');
+      if (!raw) return;
+      const payload = JSON.parse(raw);
+      if (payload._fitatu_move) {
+        // Moving existing Fitatu item to this slot
+        await moveFitatuItem(payload, slot);
+      } else {
+        // Dropping Maczfit meal
+        await syncMeal(slot, payload);
+      }
     });
     if (!items.length) zone.innerHTML = '<div class="empty-slot">Drop meal here</div>';
     items.forEach(it => {
       const card = document.createElement('div');
-      card.className = 'meal-card' + (it._fromMaczfit ? ' from-maczfit' : '');
-      card.innerHTML = `<div class="dish">${it.name||it.dish}</div><div class="macros">${macroHtml({kcal:it.energy,protein:it.protein,fat:it.fat,carbs:it.carbohydrate})}</div>`;
+      const isMaczfit = it._fromMaczfit;
+      card.className = 'meal-card' + (isMaczfit ? ' from-maczfit' : '');
+      card.draggable = true;
+      card.innerHTML = `<div class="actions"><button class="del-btn" title="Remove">✕</button></div><div class="dish">${it.name||it.dish}</div><div class="macros">${macroHtml({kcal:it.energy,protein:it.protein,fat:it.fat,carbs:it.carbohydrate})}</div>`;
+      // Drag existing Fitatu item to move between slots
+      card.addEventListener('dragstart', e => {
+        card.classList.add('dragging');
+        e.dataTransfer.setData('application/json', JSON.stringify({
+          ...it, _fitatu_move: true, _from_slot: slot
+        }));
+      });
+      card.addEventListener('dragend', () => card.classList.remove('dragging'));
+      // Delete button
+      card.querySelector('.del-btn').addEventListener('click', async () => {
+        if (!it.id) { toast('Cannot delete: no item ID', false); return; }
+        await deleteFitatuItem(slot, it);
+      });
       zone.appendChild(card);
     });
     div.appendChild(zone);
@@ -172,6 +198,49 @@ async function syncMeal(slot, meal) {
       renderFitatu();
       toast(`✓ ${meal.dish.slice(0,40)} → ${SLOT_LABELS[slot]}`);
     } else { toast(data.error || 'Sync failed', false); }
+  } catch(e) { toast(e.message, false); }
+}
+
+async function deleteFitatuItem(slot, item) {
+  try {
+    const r = await fetch('/api/fitatu/delete', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ date: fitatuDate.value, slot, itemId: item.id })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      fitatuData[slot] = (fitatuData[slot]||[]).filter(i => i.id !== item.id);
+      renderFitatu();
+      toast(`✕ Removed ${(item.name||'').slice(0,40)}`);
+    } else { toast(data.error || 'Delete failed', false); }
+  } catch(e) { toast(e.message, false); }
+}
+
+async function moveFitatuItem(item, toSlot) {
+  const fromSlot = item._from_slot;
+  if (fromSlot === toSlot) return;
+  // Delete from old slot, add to new slot
+  try {
+    if (item.id) {
+      const dr = await fetch('/api/fitatu/delete', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ date: fitatuDate.value, slot: fromSlot, itemId: item.id })
+      });
+      const dd = await dr.json();
+      if (!dd.ok) { toast(dd.error || 'Move failed (delete step)', false); return; }
+    }
+    // Re-add to new slot
+    const meal = { dish: item.name, kcal: item.energy, protein: item.protein||0, fat: item.fat||0, carbs: item.carbohydrate||0 };
+    const sr = await fetch('/api/sync', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ date: fitatuDate.value, slot: toSlot, meal })
+    });
+    const sd = await sr.json();
+    if (sd.ok) {
+      // Refresh from server to get correct IDs
+      await loadFitatu();
+      toast(`↻ Moved ${(item.name||'').slice(0,30)} → ${SLOT_LABELS[toSlot]}`);
+    } else { toast(sd.error || 'Move failed (add step)', false); }
   } catch(e) { toast(e.message, false); }
 }
 

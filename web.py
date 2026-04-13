@@ -105,9 +105,10 @@ def get_fitatu(date_str):
         for slot in FITATU_SLOTS:
             data = day.get("dietPlan", {}).get(slot, {})
             items = [
-                {"name": it.get("name", "?"), "energy": it.get("energy", 0),
-                 "protein": it.get("protein", 0), "fat": it.get("fat", 0),
-                 "carbohydrate": it.get("carbohydrate", 0), "foodType": it.get("foodType", "?")}
+                {"id": it.get("planDayDietItemId"), "name": it.get("name", "?"),
+                 "energy": it.get("energy", 0), "protein": it.get("protein", 0),
+                 "fat": it.get("fat", 0), "carbohydrate": it.get("carbohydrate", 0),
+                 "foodType": it.get("foodType", "?")}
                 for it in data.get("items", []) if not it.get("deletedAt")
             ]
             slots[slot] = items
@@ -131,6 +132,20 @@ def sync():
         r = requests.post(url, headers=fitatu_headers(), json=payload)
         r.raise_for_status()
         return jsonify({"ok": True, "response": r.json()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/fitatu/delete", methods=["POST"])
+def delete_item():
+    try:
+        ensure_fitatu()
+        data = request.json  # { date, slot, itemId }
+        uid = _state["fitatu_user_id"]
+        url = f"{FITATU_API}/diet-plan/{uid}/day/{data['date']}/{data['slot']}/{data['itemId']}"
+        r = requests.delete(url, headers=fitatu_headers())
+        r.raise_for_status()
+        return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
