@@ -1,19 +1,26 @@
 # 🥗 Maczfit Meals + Fitatu Sync
 
-Nieoficjalne narzędzia do pobierania posiłków z [Maczfit](https://www.maczfit.pl/) i synchronizacji ich z [Fitatu](https://www.fitatu.com/).
-
 Unofficial tools to fetch meals from [Maczfit](https://www.maczfit.pl/) and sync them to [Fitatu](https://www.fitatu.com/) meal planner.
+
+Nieoficjalne narzędzia do pobierania posiłków z Maczfit i synchronizacji ich z Fitatu.
 
 ---
 
-## 🇵🇱 Polski
+## What does this project do?
 
-### Co robi ten projekt?
+Three commands, one goal — get your Maczfit diet data into Fitatu with accurate per-dish macros:
 
-1. **`meals`** — Loguje się na konto Maczfit i wyświetla posiłki na wybrany dzień (nazwy dań, kalorie, szacunkowe makro, alergeny, skład)
-2. **`sync`** — Pobiera posiłki z Maczfit, pozwala wybrać które zsynchronizować, a następnie wstawia je do planera Fitatu
+| Command | Description |
+|---------|-------------|
+| `meals` | Show today's meals with real calories, macros (F/C/P), allergens, and ingredients |
+| `sync`  | Interactive CLI — pick which meals to push into Fitatu planner |
+| `ui`    | Web UI with drag-and-drop — visually manage Maczfit → Fitatu sync |
 
-### Szybki start
+Calories and macros are **accurate per dish** — fetched from the Maczfit Nutrient API, not estimated from diet ratios.
+
+---
+
+## Quick start
 
 ```bash
 git clone https://github.com/<your-username>/maczfit.git
@@ -22,121 +29,58 @@ cp config.json.example config.json
 chmod 600 config.json
 ```
 
-Edytuj `config.json`:
+Edit `config.json`:
 
 ```json
 {
-  "maczfit_email": "twoj-email@example.com",
-  "maczfit_password": "twoje-haslo",
-  "fitatu_email": "twoj-fitatu@example.com",
-  "fitatu_password": "twoje-fitatu-haslo"
+  "maczfit_email": "your-maczfit-email@example.com",
+  "maczfit_password": "your-maczfit-password",
+  "fitatu_email": "your-fitatu-email@example.com",
+  "fitatu_password": "your-fitatu-password"
 }
 ```
 
-Użycie:
-
-```bash
-# Pokaż posiłki Maczfit na dziś
-./run.sh meals
-
-# Pokaż posiłki na konkretny dzień
-./run.sh meals 2026-04-09
-
-# Synchronizuj posiłki Maczfit → Fitatu
-./run.sh sync
-
-# Synchronizuj konkretny dzień
-./run.sh sync 2026-04-09
-```
-
-### Przykład synchronizacji
-
-```
-==================================================
-  Maczfit → Fitatu Sync  |  2026-04-09
-==================================================
-
-[Maczfit] Logging in...
-Logged in. (userId=295623)
-
-Maczfit meals for 2026-04-09:
-
-  [1] Śniadanie: Truskawkowa muffinka z migdałami
-      584 kcal | F: 22.7g | C: 65.7g | P: 29.2g
-  [2] II Śniadanie: Baton kajmakowy z płatków
-      380 kcal | F: 14.8g | C: 42.7g | P: 19.0g
-  [3] Obiad: Makaron udon z sezamem i tofu
-      744 kcal | F: 28.9g | C: 83.7g | P: 37.2g
-  [4] Podwieczorek: Zupa curry z dynią
-      301 kcal | F: 11.7g | C: 33.9g | P: 15.1g
-  [5] Kolacja: Zupa krem z ogórka kiszonego
-      670 kcal | F: 26.1g | C: 75.4g | P: 33.5g
-
-  [A] All meals
-
-Select meals to sync (e.g. 1,3,5 or A for all): A
-
-[Fitatu] Logging in...
-[Fitatu] Logged in (userId=abc123)
-[Fitatu] Fetching planner for 2026-04-09...
-  + [Śniadanie] Truskawkowa muffinka → breakfast
-  + [II Śniadanie] Baton kajmakowy → second_breakfast
-  + [Obiad] Makaron udon → lunch
-  + [Podwieczorek] Zupa curry → snack
-  + [Kolacja] Zupa krem → dinner
-
-[Fitatu] Saving 5 item(s)...
-[Fitatu] Done! Check your Fitatu planner.
-```
-
-### Uwagi
-
-- Makroskładniki (B/T/W) są **szacunkowe** — API Maczfit nie udostępnia rozbicia per danie
-- Kalorie per posiłek są **dokładne** z API Maczfit
-- Posiłki trafiają do Fitatu jako "Custom Items"
-- `config.json` zawiera hasła w postaci jawnej — ogranicz uprawnienia: `chmod 600 config.json`
-- Oba skrypty korzystają z nieoficjalnych API
+The first run creates a virtualenv and installs dependencies automatically.
 
 ---
 
-## 🇬🇧 English
+## Usage
 
-### What does this project do?
-
-1. **`meals`** — Logs into Maczfit and displays meals for a given day (dish names, calories, estimated macros, allergens, ingredients)
-2. **`sync`** — Fetches meals from Maczfit, lets you pick which ones to sync, then inserts them into Fitatu planner
-
-### Quick start
+### Show meals (CLI)
 
 ```bash
-git clone https://github.com/<your-username>/maczfit.git
-cd maczfit
-cp config.json.example config.json
-chmod 600 config.json
+./run.sh meals              # today
+./run.sh meals 2026-04-13   # specific date
 ```
 
-Edit `config.json` with your credentials, then:
+Outputs dish names, kcal, fat/carbs/protein, allergens, and composition for each meal.
+
+### Sync to Fitatu (CLI)
 
 ```bash
-# Show today's Maczfit meals
-./run.sh meals
-
-# Sync Maczfit meals → Fitatu planner
-./run.sh sync
-
-# Specific date
-./run.sh sync 2026-04-09
+./run.sh sync               # today
+./run.sh sync 2026-04-13    # specific date
 ```
 
-### Notes
+Shows a numbered list of meals, lets you pick which to sync (e.g. `1,3,5` or `A` for all), then pushes them to Fitatu as Custom Items in the correct meal slots.
 
-- Macros are **estimated** from the diet type ratio (Maczfit API only provides per-meal kcal)
-- Meals are inserted into Fitatu as "Custom Items"
-- Both scripts use unofficial APIs — may break if the services change
+### Web UI
+
+```bash
+./run.sh ui
+```
+
+Opens a local web server at **http://localhost:5555** with a drag-and-drop interface:
+
+- Left panel: Maczfit meals for the selected date
+- Right panel: Fitatu planner slots (breakfast, second breakfast, lunch, snack, dinner, supper)
+- Drag meals from Maczfit into Fitatu slots
+- Edit, move, or delete items directly in the Fitatu panel
+- Date picker to switch between days
 
 ---
 
-## Meal slot mapping / Mapowanie posiłków
+## Meal slot mapping
 
 | Maczfit | Fitatu slot |
 |---------|-------------|
@@ -146,23 +90,22 @@ Edit `config.json` with your credentials, then:
 | Podwieczorek | `snack` |
 | Kolacja | `dinner` |
 
-## Diet macro ratios / Proporcje makro
+---
 
-| Diet | Fat % | Carbs % | Protein % |
-|------|-------|---------|-----------|
-| FIT / Slim / Comfort | 35 | 45 | 20 |
-| Vege | 35 | 47 | 18 |
-| Diabetic | 35 | 42 | 23 |
-| Wegan | 35 | 50 | 15 |
-| Hypo Hashimoto | 35 | 43 | 22 |
-| Keto IF | 75 | 5 | 20 |
+## Notes
 
-## Requirements / Wymagania
+- Macros are fetched per dish from the Maczfit Nutrient Stats API — not estimated
+- Meals appear in Fitatu as "Custom Items"
+- `config.json` contains plaintext passwords — restrict permissions with `chmod 600`
+- Both APIs are unofficial and may break if the services change
+- Fitatu credentials are only needed for `sync` and `ui` commands
+
+## Requirements
 
 - Python 3.8+
 - Active Maczfit account with a current diet order
-- Fitatu account (for sync feature)
+- Fitatu account (for sync/ui)
 
-## License / Licencja
+## License
 
 MIT
