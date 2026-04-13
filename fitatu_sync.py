@@ -4,6 +4,7 @@ import sys
 import json
 import os
 import uuid
+import base64
 import requests
 from datetime import date, datetime
 from getpass import getpass
@@ -33,6 +34,12 @@ MEAL_SLOT_MAP = {
     5: "dinner",            # Kolacja
 }
 
+FITATU_SLOTS = ["breakfast", "second_breakfast", "lunch", "dinner", "snack", "supper"]
+FITATU_SLOT_LABELS = {
+    "breakfast": "1-Breakfast", "second_breakfast": "2-Second breakfast",
+    "lunch": "3-Lunch", "dinner": "4-Dinner", "snack": "5-Snack", "supper": "6-Supper",
+}
+
 fitatu_token = None
 fitatu_user_id = None
 
@@ -40,11 +47,15 @@ fitatu_user_id = None
 def fitatu_login(email, password):
     global fitatu_token, fitatu_user_id
     r = requests.post(f"{FITATU_API}/login", headers=FITATU_HEADERS,
-                       json={"email": email, "password": password})
+                       json={"_username": email, "_password": password})
     r.raise_for_status()
     data = r.json()
-    fitatu_token = data.get("token")
-    fitatu_user_id = data.get("userId") or data.get("id")
+    fitatu_token = data["token"]
+    # Extract userId from JWT payload
+    payload = fitatu_token.split(".")[1]
+    payload += "=" * (4 - len(payload) % 4)
+    claims = json.loads(base64.b64decode(payload))
+    fitatu_user_id = claims["id"]
     print(f"[Fitatu] Logged in (userId={fitatu_user_id})")
 
 
@@ -59,32 +70,29 @@ def fitatu_get_planner_day(target_date):
     return r.json()
 
 
-def fitatu_save_planner_day(target_date, planner_day):
-    url = f"{FITATU_API}/diet-and-activity-plan/{fitatu_user_id}/day/{target_date.isoformat()}"
-    r = requests.put(url, headers=fitatu_auth_headers(), json=planner_day)
+def fitatu_sync_day(target_date, day_payload):
+    """POST sync payload to /diet-plan/{userId}/days."""
+    url = f"{FITATU_API}/diet-plan/{fitatu_user_id}/days?synchronous=true"
+    r = requests.post(url, headers=fitatu_auth_headers(), json=day_payload)
     r.raise_for_status()
     return r.json()
 
 
 def make_fitatu_item(dish_name, kcal, macros):
-    """Create a Fitatu CUSTOM_ITEM planner entry."""
+    """Create a Fitatu CUSTOM_ITEM for the sync payload."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return {
-        "name": dish_name,
-        "energy": round(kcal),
-        "protein": macros["protein"],
-        "fat": macros["fat"],
-        "carbohydrate": macros["carbs"],
-        "weight": 100,
+        "planDayDietItemId": str(uuid.uuid1()),
         "foodType": "CUSTOM_ITEM",
-        "planDayDietItemId": str(uuid.uuid4()),
         "measureId": 1,
-        "measureName": "porcja",
         "measureQuantity": 1,
         "source": "API",
         "updatedAt": now,
-        "verified": False,
-        "containNutritions": True,
+        "protein": macros["protein"],
+        "fat": macros["fat"],
+        "carbohydrate": macros["carbs"],
+        "energy": round(kcal),
+        "name": dish_name,
     }
 
 
@@ -111,8 +119,8 @@ def fetch_maczfit_meals(target_date, cfg):
     return meals_response.get("Meals", []), diet_group
 
 
-def display_and_select(meals, diet_group):
-    """Show meals and let user pick which to sync."""
+def display_and_select(meals, diet_group, target_date):
+    """Show meals, let user pick which to sync, then assign slots and date."""
     fat_pct, carb_pct, protein_pct = maczfit.DIET_MACROS.get(
         diet_group, maczfit.DIET_MACROS["WYBÓR MENU"])
 
@@ -129,6 +137,7 @@ def display_and_select(meals, diet_group):
         items.append({
             "index": i, "label": label, "dish": dish,
             "kcal": kcal, "macros": macros, "slot": slot, "meal_type_id": mt,
+            "date": target_date,
         })
         print(f"  [{i+1}] {label}: {dish}")
         print(f"      {kcal:.0f} kcal | F: {macros['fat']}g | C: {macros['carbs']}g | P: {macros['protein']}g")
@@ -137,40 +146,63 @@ def display_and_select(meals, diet_group):
     choice = input("\nSelect meals to sync (e.g. 1,3,5 or A for all): ").strip().upper()
 
     if choice == "A":
-        return items
-    try:
-        indices = [int(x.strip()) - 1 for x in choice.split(",")]
-        return [items[i] for i in indices if 0 <= i < len(items)]
-    except (ValueError, IndexError):
-        print("Invalid selection.")
+        selected = items
+    else:
+        try:
+            indices = [int(x.strip()) - 1 for x in choice.split(",")]
+            selected = [items[i] for i in indices if 0 <= i < len(items)]
+        except (ValueError, IndexError):
+            print("Invalid selection.")
+            return []
+
+    if not selected:
         return []
 
+    # Ask user if they want to customize slots/date
+    customize = input("\nCustomize meal slots/date? (y/N): ").strip().lower()
+    if customize == "y":
+        slot_help = "  " + " | ".join(f"{i+1}={s}" for i, s in enumerate(FITATU_SLOTS))
+        print(f"\nFitatu meal slots:\n{slot_help}\n")
+        for item in selected:
+            current_slot = item["slot"]
+            current_date = item["date"]
+            prompt = f"  {item['dish'][:50]}\n    Slot [{current_slot}] (1-6 or Enter to keep): "
+            slot_input = input(prompt).strip()
+            if slot_input and slot_input.isdigit():
+                idx = int(slot_input) - 1
+                if 0 <= idx < len(FITATU_SLOTS):
+                    item["slot"] = FITATU_SLOTS[idx]
 
-def sync_to_fitatu(selected_items, target_date):
-    """Push selected meals to Fitatu planner."""
-    print(f"\n[Fitatu] Fetching planner for {target_date}...")
-    planner_day = fitatu_get_planner_day(target_date)
+            date_input = input(f"    Date [{current_date}] (YYYY-MM-DD or Enter to keep): ").strip()
+            if date_input:
+                try:
+                    item["date"] = date.fromisoformat(date_input)
+                except ValueError:
+                    print("    Invalid date, keeping original.")
 
-    diet_plan = planner_day.get("dietPlan", {})
+    return selected
 
-    added = 0
+
+def sync_to_fitatu(selected_items):
+    """Build sync payload and POST to /diet-plan/{userId}/days."""
+    # Group items by date and slot
+    by_date = {}
     for item in selected_items:
+        d = item["date"].isoformat()
         slot = item["slot"]
-        if slot not in diet_plan:
-            diet_plan[slot] = {"items": []}
-        if "items" not in diet_plan[slot]:
-            diet_plan[slot]["items"] = []
-
+        by_date.setdefault(d, {}).setdefault(slot, [])
         fitatu_item = make_fitatu_item(item["dish"], item["kcal"], item["macros"])
-        diet_plan[slot]["items"].append(fitatu_item)
-        added += 1
-        print(f"  + [{item['label']}] {item['dish']} → {slot}")
+        by_date[d][slot].append(fitatu_item)
+        print(f"  + {item['dish'][:50]} → {slot} ({d})")
 
-    planner_day["dietPlan"] = diet_plan
-    planner_day["pushRequired"] = True
+    # Build payload: { "2026-04-13": { "dietPlan": { "breakfast": { "items": [...] } } } }
+    payload = {
+        d: {"dietPlan": {slot: {"items": items} for slot, items in slots.items()}}
+        for d, slots in by_date.items()
+    }
 
-    print(f"\n[Fitatu] Saving {added} item(s)...")
-    fitatu_save_planner_day(target_date, planner_day)
+    print(f"\n[Fitatu] Syncing {len(selected_items)} item(s)...")
+    fitatu_sync_day(target_date, payload)
     print("[Fitatu] Done! Check your Fitatu planner.")
 
 
@@ -201,7 +233,7 @@ def main():
 
     # Step 2: Select meals
     print(f"\nMaczfit meals for {target_date}:\n")
-    selected = display_and_select(meals, diet_group)
+    selected = display_and_select(meals, diet_group, target_date)
     if not selected:
         print("Nothing selected, exiting.")
         return
@@ -218,7 +250,7 @@ def main():
     fitatu_login(fitatu_email, fitatu_password)
 
     # Step 4: Push to Fitatu
-    sync_to_fitatu(selected, target_date)
+    sync_to_fitatu(selected)
 
 
 if __name__ == "__main__":
