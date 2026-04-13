@@ -38,6 +38,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 @keyframes fadeInOut { 0%{opacity:0;transform:translateX(-50%) translateY(10px)} 15%{opacity:1;transform:translateX(-50%) translateY(0)} 85%{opacity:1} 100%{opacity:0} }
 .loading { text-align: center; padding: 40px; color: #999; }
 .day-total { padding: 12px; border-top: 2px solid #eee; font-size: 13px; font-weight: 600; color: #333; flex-shrink: 0; }
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 50; align-items: center; justify-content: center; }
+.modal-overlay.open { display: flex; }
+.modal { background: #fff; border-radius: 12px; padding: 24px; width: 360px; box-shadow: 0 8px 30px rgba(0,0,0,.2); }
+.modal h3 { margin-bottom: 16px; font-size: 16px; }
+.modal label { display: block; font-size: 12px; color: #666; margin-top: 10px; }
+.modal input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-top: 2px; }
+.modal .btn-row { display: flex; gap: 8px; margin-top: 18px; }
+.modal button { flex: 1; padding: 10px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+.modal .btn-save { background: #FF8700; color: #fff; }
+.modal .btn-cancel { background: #eee; color: #333; }
 </style>
 </head>
 <body>
@@ -61,6 +71,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     </div>
     <div class="panel-body" id="fitatu-slots"></div>
     <div class="day-total" id="fitatu-total"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal">
+    <h3>Edit meal</h3>
+    <label>Name<input id="ed-name"></label>
+    <label>Calories (kcal)<input id="ed-energy" type="number"></label>
+    <label>Protein (g)<input id="ed-protein" type="number" step="0.1"></label>
+    <label>Fat (g)<input id="ed-fat" type="number" step="0.1"></label>
+    <label>Carbs (g)<input id="ed-carbs" type="number" step="0.1"></label>
+    <div class="btn-row">
+      <button class="btn-cancel" onclick="closeEdit()">Cancel</button>
+      <button class="btn-save" onclick="saveEdit()">Save</button>
+    </div>
   </div>
 </div>
 
@@ -150,7 +175,7 @@ function renderFitatu() {
       const isMaczfit = it._fromMaczfit;
       card.className = 'meal-card' + (isMaczfit ? ' from-maczfit' : '');
       card.draggable = true;
-      card.innerHTML = `<div class="actions"><button class="del-btn" title="Remove">✕</button></div><div class="dish">${it.name||it.dish}</div><div class="macros">${macroHtml({kcal:it.energy,protein:it.protein,fat:it.fat,carbs:it.carbohydrate})}</div>`;
+      card.innerHTML = `<div class="actions"><button class="edit-btn" title="Edit">✎</button><button class="del-btn" title="Remove">✕</button></div><div class="dish">${it.name||it.dish}</div><div class="macros">${macroHtml({kcal:it.energy,protein:it.protein,fat:it.fat,carbs:it.carbohydrate})}</div>`;
       // Drag existing Fitatu item to move between slots
       card.addEventListener('dragstart', e => {
         card.classList.add('dragging');
@@ -164,6 +189,8 @@ function renderFitatu() {
         if (!it.id) { toast('Cannot delete: no item ID', false); return; }
         await deleteFitatuItem(slot, it);
       });
+      // Edit button
+      card.querySelector('.edit-btn').addEventListener('click', () => openEdit(slot, it));
       zone.appendChild(card);
     });
     div.appendChild(zone);
@@ -230,6 +257,46 @@ async function moveFitatuItem(item, toSlot) {
       await loadFitatu();
       toast(`↻ Moved ${(item.name||'').slice(0,30)} → ${SLOT_LABELS[toSlot]}`);
     } else { toast(data.error || 'Move failed', false); }
+  } catch(e) { toast(e.message, false); }
+}
+
+// --- Edit modal ---
+let editCtx = null;
+const editModal = document.getElementById('edit-modal');
+
+function openEdit(slot, item) {
+  editCtx = { slot, item };
+  document.getElementById('ed-name').value = item.name || '';
+  document.getElementById('ed-energy').value = item.energy || 0;
+  document.getElementById('ed-protein').value = item.protein || 0;
+  document.getElementById('ed-fat').value = item.fat || 0;
+  document.getElementById('ed-carbs').value = item.carbohydrate || 0;
+  editModal.classList.add('open');
+}
+
+function closeEdit() { editModal.classList.remove('open'); editCtx = null; }
+
+async function saveEdit() {
+  if (!editCtx) return;
+  const { slot, item } = editCtx;
+  const updated = {
+    name: document.getElementById('ed-name').value,
+    energy: +document.getElementById('ed-energy').value,
+    protein: +document.getElementById('ed-protein').value,
+    fat: +document.getElementById('ed-fat').value,
+    carbohydrate: +document.getElementById('ed-carbs').value,
+  };
+  closeEdit();
+  try {
+    const r = await fetch('/api/fitatu/edit', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ date: fitatuDate.value, slot, item, updated })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      await loadFitatu();
+      toast(`✎ Updated ${updated.name.slice(0,40)}`);
+    } else { toast(data.error || 'Edit failed', false); }
   } catch(e) { toast(e.message, false); }
 }
 

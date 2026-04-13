@@ -211,5 +211,45 @@ def move_item():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/api/fitatu/edit", methods=["POST"])
+def edit_item():
+    """Edit item: delete old + add updated in one sync call."""
+    try:
+        ensure_fitatu()
+        data = request.json  # { date, slot, item (original), updated {name,energy,protein,fat,carbohydrate} }
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item = data["item"]
+        upd = data["updated"]
+
+        # Delete old
+        del_item = {
+            "planDayDietItemId": item["id"],
+            "foodType": item.get("foodType", "CUSTOM_ITEM"),
+            "measureId": 1, "measureQuantity": 1,
+            "source": "API", "deletedAt": now, "updatedAt": now,
+        }
+        if item.get("foodType") == "CUSTOM_ITEM":
+            del_item.update({"name": item.get("name", "x"), "energy": item.get("energy", 0),
+                             "protein": item.get("protein", 0), "fat": item.get("fat", 0),
+                             "carbohydrate": item.get("carbohydrate", 0)})
+        else:
+            del_item["productId"] = item.get("productId")
+
+        # Add new with updated values
+        macros = {"protein": upd["protein"], "fat": upd["fat"], "carbs": upd["carbohydrate"]}
+        add_item = make_fitatu_item(upd["name"], upd["energy"], macros)
+
+        payload = {
+            data["date"]: {"dietPlan": {data["slot"]: {"items": [del_item, add_item]}}}
+        }
+        uid = _state["fitatu_user_id"]
+        url = f"{FITATU_API}/diet-plan/{uid}/days?synchronous=true"
+        r = requests.post(url, headers=fitatu_headers(), json=payload)
+        r.raise_for_status()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5555)
