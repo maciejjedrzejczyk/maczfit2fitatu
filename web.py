@@ -11,7 +11,7 @@ from flask import Flask, jsonify, request, send_file
 import maczfit_meals as maczfit
 from fitatu_sync import (
     FITATU_API, FITATU_HEADERS, FITATU_SLOTS,
-    MEAL_SLOT_MAP, make_fitatu_item,
+    MEAL_SLOT_MAP, make_fitatu_item, _load_fitatu_headers,
 )
 
 app = Flask(__name__)
@@ -38,6 +38,7 @@ def ensure_maczfit():
 
 def ensure_fitatu():
     if not _state["fitatu_token"]:
+        _load_fitatu_headers()
         c = cfg()
         r = requests.post(f"{FITATU_API}/login", headers=FITATU_HEADERS,
                            json={"_username": c["fitatu_email"], "_password": c["fitatu_password"]})
@@ -248,4 +249,4 @@ def edit_item():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5555)
+    app.run(host="0.0.0.0", debug=True, port=5555)

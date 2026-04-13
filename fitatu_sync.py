@@ -16,14 +16,27 @@ CONFIG_PATH = maczfit.CONFIG_PATH
 # Fitatu API config
 FITATU_API = "https://fitatu.com/api"
 FITATU_HEADERS = {
-    "API-Key": "FITATU-MOBILE-APP",
-    "API-Secret": "PYRXtfs88UDJMuCCrNpLV",
-    "APP-UUID": "64c2d1b0-c8ad-11e8-8956-0242ac120008",
-    "APP-Version": "4.5.11",
-    "APP-OS": "FITATU-WEB",
     "Accept": "application/json; version=v3",
     "Content-Type": "application/json",
 }
+
+
+def _load_fitatu_headers():
+    """Load Fitatu API keys from config.json into FITATU_HEADERS."""
+    if os.path.exists(CONFIG_PATH):
+        with open(CONFIG_PATH) as f:
+            cfg = json.load(f)
+        api_key = cfg.get("fitatu_api_key", "")
+        api_secret = cfg.get("fitatu_api_secret", "")
+        if not api_key or not api_secret or "your-" in api_key:
+            raise RuntimeError(
+                "Missing fitatu_api_key / fitatu_api_secret in config.json.\n"
+                "See README for how to obtain them."
+            )
+        FITATU_HEADERS.update({
+            "API-Key": api_key,
+            "API-Secret": api_secret,
+        })
 
 # Maczfit meal type → Fitatu meal slot
 MEAL_SLOT_MAP = {
@@ -42,6 +55,7 @@ fitatu_user_id = None
 
 def fitatu_login(email, password):
     global fitatu_token, fitatu_user_id
+    _load_fitatu_headers()
     r = requests.post(f"{FITATU_API}/login", headers=FITATU_HEADERS,
                        json={"_username": email, "_password": password})
     r.raise_for_status()

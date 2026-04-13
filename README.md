@@ -36,11 +36,31 @@ Edit `config.json`:
   "maczfit_email": "your-maczfit-email@example.com",
   "maczfit_password": "your-maczfit-password",
   "fitatu_email": "your-fitatu-email@example.com",
-  "fitatu_password": "your-fitatu-password"
+  "fitatu_password": "your-fitatu-password",
+  "fitatu_api_key": "your-fitatu-api-key",
+  "fitatu_api_secret": "your-fitatu-api-secret"
 }
 ```
 
+To obtain the Fitatu API key and secret, open the Fitatu web app at https://www.fitatu.com/app/diet, open your browser's developer tools (F12 → Network tab), log in, and inspect any API request to `fitatu.com/api/`. The `API-Key` and `API-Secret` values are sent as request headers.
+
+### Option A: Run with Docker
+
+```bash
+docker compose --profile meals run --rm meals     # show today's meals
+docker compose --profile sync run --rm sync       # interactive sync to Fitatu
+docker compose --profile ui up ui                 # web UI at http://localhost:5555
+```
+
+### Option B: Run locally
+
 The first run creates a virtualenv and installs dependencies automatically.
+
+```bash
+./run.sh meals              # show today's meals
+./run.sh sync               # interactive sync to Fitatu
+./run.sh ui                 # web UI at http://localhost:5555
+```
 
 ---
 
@@ -102,7 +122,7 @@ Opens a local web server at **http://localhost:5555** with a drag-and-drop inter
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.8+ (or Docker)
 - Active Maczfit account with a current diet order
 - Fitatu account (for sync/ui)
 

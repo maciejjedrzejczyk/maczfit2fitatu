@@ -2,5 +2,7 @@
   "maczfit_email": "your-maczfit-email@example.com",
   "maczfit_password": "your-maczfit-password",
   "fitatu_email": "your-fitatu-email@example.com",
-  "fitatu_password": "your-fitatu-password"
+  "fitatu_password": "your-fitatu-password",
+  "fitatu_api_key": "your-fitatu-api-key",
+  "fitatu_api_secret": "your-fitatu-api-secret"
 }

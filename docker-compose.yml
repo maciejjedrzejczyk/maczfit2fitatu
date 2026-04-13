@@ -1,0 +1,27 @@
+services:
+  meals:
+    build: .
+    command: ["maczfit_meals.py"]
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./config.json:/app/config.json:ro
+    profiles: [meals]
+
+  sync:
+    build: .
+    command: ["fitatu_sync.py"]
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./config.json:/app/config.json:ro
+    profiles: [sync]
+
+  ui:
+    build: .
+    command: ["web.py"]
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./config.json:/app/config.json:ro
+    profiles: [ui]
