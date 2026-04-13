@@ -108,7 +108,7 @@ def get_fitatu(date_str):
                 {"id": it.get("planDayDietItemId"), "name": it.get("name", "?"),
                  "energy": it.get("energy", 0), "protein": it.get("protein", 0),
                  "fat": it.get("fat", 0), "carbohydrate": it.get("carbohydrate", 0),
-                 "foodType": it.get("foodType", "?")}
+                 "foodType": it.get("foodType", "?"), "productId": it.get("productId")}
                 for it in data.get("items", []) if not it.get("deletedAt")
             ]
             slots[slot] = items
@@ -140,20 +140,65 @@ def sync():
 def delete_item():
     try:
         ensure_fitatu()
-        data = request.json  # { date, slot, itemId, foodType }
+        data = request.json  # { date, slot, item: {id, foodType, name, energy, protein, fat, carbohydrate} }
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item = data["item"]
+        sync_item = {
+            "planDayDietItemId": item["id"],
+            "foodType": item.get("foodType", "CUSTOM_ITEM"),
+            "measureId": 1, "measureQuantity": 1,
+            "source": "API", "deletedAt": now, "updatedAt": now,
+        }
+        # CUSTOM_ITEM requires nutritional fields even for deletion
+        if item.get("foodType") == "CUSTOM_ITEM":
+            sync_item.update({"name": item.get("name", "x"), "energy": item.get("energy", 0),
+                              "protein": item.get("protein", 0), "fat": item.get("fat", 0),
+                              "carbohydrate": item.get("carbohydrate", 0)})
+        else:
+            sync_item["productId"] = item.get("productId")
+        payload = {data["date"]: {"dietPlan": {data["slot"]: {"items": [sync_item]}}}}
+        uid = _state["fitatu_user_id"]
+        url = f"{FITATU_API}/diet-plan/{uid}/days?synchronous=true"
+        r = requests.post(url, headers=fitatu_headers(), json=payload)
+        r.raise_for_status()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/fitatu/move", methods=["POST"])
+def move_item():
+    """Move item between slots: delete from old + add to new in one sync call."""
+    try:
+        ensure_fitatu()
+        data = request.json  # { date, fromSlot, toSlot, item }
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item = data["item"]
+
+        # Build delete entry for old slot
+        del_item = {
+            "planDayDietItemId": item["id"],
+            "foodType": item.get("foodType", "CUSTOM_ITEM"),
+            "measureId": 1, "measureQuantity": 1,
+            "source": "API", "deletedAt": now, "updatedAt": now,
+        }
+        if item.get("foodType") == "CUSTOM_ITEM":
+            del_item.update({"name": item.get("name", "x"), "energy": item.get("energy", 0),
+                             "protein": item.get("protein", 0), "fat": item.get("fat", 0),
+                             "carbohydrate": item.get("carbohydrate", 0)})
+        else:
+            del_item["productId"] = item.get("productId")
+
+        # Build add entry for new slot
+        macros = {"protein": item.get("protein", 0), "fat": item.get("fat", 0),
+                  "carbs": item.get("carbohydrate", 0)}
+        add_item = make_fitatu_item(item.get("name", "?"), item.get("energy", 0), macros)
+
         payload = {
             data["date"]: {
                 "dietPlan": {
-                    data["slot"]: {
-                        "items": [{
-                            "planDayDietItemId": data["itemId"],
-                            "foodType": data.get("foodType", "CUSTOM_ITEM"),
-                            "measureId": 1, "measureQuantity": 1,
-                            "source": "API",
-                            "deletedAt": now, "updatedAt": now,
-                        }]
-                    }
+                    data["fromSlot"]: {"items": [del_item]},
+                    data["toSlot"]: {"items": [add_item]},
                 }
             }
         }

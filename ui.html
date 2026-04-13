@@ -205,7 +205,7 @@ async function deleteFitatuItem(slot, item) {
   try {
     const r = await fetch('/api/fitatu/delete', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ date: fitatuDate.value, slot, itemId: item.id, foodType: item.foodType })
+      body: JSON.stringify({ date: fitatuDate.value, slot, item })
     });
     const data = await r.json();
     if (data.ok) {
@@ -219,28 +219,17 @@ async function deleteFitatuItem(slot, item) {
 async function moveFitatuItem(item, toSlot) {
   const fromSlot = item._from_slot;
   if (fromSlot === toSlot) return;
-  // Delete from old slot, add to new slot
+  // Delete from old slot + add to new slot via /api/move
   try {
-    if (item.id) {
-      const dr = await fetch('/api/fitatu/delete', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ date: fitatuDate.value, slot: fromSlot, itemId: item.id, foodType: item.foodType })
-      });
-      const dd = await dr.json();
-      if (!dd.ok) { toast(dd.error || 'Move failed (delete step)', false); return; }
-    }
-    // Re-add to new slot
-    const meal = { dish: item.name, kcal: item.energy, protein: item.protein||0, fat: item.fat||0, carbs: item.carbohydrate||0 };
-    const sr = await fetch('/api/sync', {
+    const r = await fetch('/api/fitatu/move', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ date: fitatuDate.value, slot: toSlot, meal })
+      body: JSON.stringify({ date: fitatuDate.value, fromSlot, toSlot, item })
     });
-    const sd = await sr.json();
-    if (sd.ok) {
-      // Refresh from server to get correct IDs
+    const data = await r.json();
+    if (data.ok) {
       await loadFitatu();
       toast(`↻ Moved ${(item.name||'').slice(0,30)} → ${SLOT_LABELS[toSlot]}`);
-    } else { toast(sd.error || 'Move failed (add step)', false); }
+    } else { toast(data.error || 'Move failed', false); }
   } catch(e) { toast(e.message, false); }
 }
 
