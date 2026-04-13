@@ -35,10 +35,6 @@ MEAL_SLOT_MAP = {
 }
 
 FITATU_SLOTS = ["breakfast", "second_breakfast", "lunch", "dinner", "snack", "supper"]
-FITATU_SLOT_LABELS = {
-    "breakfast": "1-Breakfast", "second_breakfast": "2-Second breakfast",
-    "lunch": "3-Lunch", "dinner": "4-Dinner", "snack": "5-Snack", "supper": "6-Supper",
-}
 
 fitatu_token = None
 fitatu_user_id = None
@@ -51,7 +47,6 @@ def fitatu_login(email, password):
     r.raise_for_status()
     data = r.json()
     fitatu_token = data["token"]
-    # Extract userId from JWT payload
     payload = fitatu_token.split(".")[1]
     payload += "=" * (4 - len(payload) % 4)
     claims = json.loads(base64.b64decode(payload))
@@ -61,13 +56,6 @@ def fitatu_login(email, password):
 
 def fitatu_auth_headers():
     return {**FITATU_HEADERS, "Authorization": f"Bearer {fitatu_token}"}
-
-
-def fitatu_get_planner_day(target_date):
-    url = f"{FITATU_API}/diet-and-activity-plan/{fitatu_user_id}/day/{target_date.isoformat()}"
-    r = requests.get(url, headers=fitatu_auth_headers())
-    r.raise_for_status()
-    return r.json()
 
 
 def make_fitatu_item(dish_name, kcal, macros):
@@ -89,7 +77,7 @@ def make_fitatu_item(dish_name, kcal, macros):
 
 
 def fetch_maczfit_meals(target_date, cfg):
-    """Login to Maczfit and return (meals_list, diet_group)."""
+    """Login to Maczfit and return meals list."""
     email = cfg.get("maczfit_email", cfg.get("email"))
     password = cfg.get("maczfit_password", cfg.get("password"))
     if not email or "example.com" in email or email.startswith("<"):
@@ -105,34 +93,33 @@ def fetch_maczfit_meals(target_date, cfg):
     if not pkg:
         raise RuntimeError("No Maczfit package for this date")
 
-    diet_group = pkg.get("Product", {}).get("Group",
-        pkg.get("Product", {}).get("ChooseMenuDietGroupName", "WYBÓR MENU"))
     meals_response = maczfit.get_package_meals(pkg["Id"])
-    return meals_response.get("Meals", []), diet_group
+    return meals_response.get("Meals", [])
 
 
-def display_and_select(meals, diet_group, target_date):
-    """Show meals, let user pick which to sync, then assign slots and date."""
-    fat_pct, carb_pct, protein_pct = maczfit.DIET_MACROS.get(
-        diet_group, maczfit.DIET_MACROS["WYBÓR MENU"])
-
+def display_and_select(meals, target_date):
+    """Show meals with real macros, let user pick which to sync."""
     items = []
     for i, meal in enumerate(meals):
         mi = meal.get("MenuItem", {})
         mt = mi.get("MealTypeId", meal.get("MealTypeId", 0))
         dish = mi.get("DishName", "?")
-        kcal = mi.get("KcalSum", 0) or 0
-        macros = maczfit.estimate_macros(kcal, fat_pct, carb_pct, protein_pct)
         label = maczfit.MEAL_TYPES.get(mt, f"Meal {mt}")
         slot = MEAL_SLOT_MAP.get(mt, "snack")
 
+        macros = maczfit.get_nutrient_stats(mi["Id"])
+        if not macros:
+            print(f"  [{i+1}] {label}: {dish}  (nutrient data unavailable)")
+            continue
+
+        kcal = macros["kcal"]
         items.append({
             "index": i, "label": label, "dish": dish,
             "kcal": kcal, "macros": macros, "slot": slot, "meal_type_id": mt,
             "date": target_date,
         })
         print(f"  [{i+1}] {label}: {dish}")
-        print(f"      {kcal:.0f} kcal | F: {macros['fat']}g | C: {macros['carbs']}g | P: {macros['protein']}g")
+        print(f"      {kcal} kcal | F: {macros['fat']}g | C: {macros['carbs']}g | P: {macros['protein']}g")
 
     print(f"\n  [A] All meals")
     choice = input("\nSelect meals to sync (e.g. 1,3,5 or A for all): ").strip().upper()
@@ -150,22 +137,19 @@ def display_and_select(meals, diet_group, target_date):
     if not selected:
         return []
 
-    # Ask user if they want to customize slots/date
     customize = input("\nCustomize meal slots/date? (y/N): ").strip().lower()
     if customize == "y":
         slot_help = "  " + " | ".join(f"{i+1}={s}" for i, s in enumerate(FITATU_SLOTS))
         print(f"\nFitatu meal slots:\n{slot_help}\n")
         for item in selected:
-            current_slot = item["slot"]
-            current_date = item["date"]
-            prompt = f"  {item['dish'][:50]}\n    Slot [{current_slot}] (1-6 or Enter to keep): "
+            prompt = f"  {item['dish'][:50]}\n    Slot [{item['slot']}] (1-6 or Enter to keep): "
             slot_input = input(prompt).strip()
             if slot_input and slot_input.isdigit():
                 idx = int(slot_input) - 1
                 if 0 <= idx < len(FITATU_SLOTS):
                     item["slot"] = FITATU_SLOTS[idx]
 
-            date_input = input(f"    Date [{current_date}] (YYYY-MM-DD or Enter to keep): ").strip()
+            date_input = input(f"    Date [{item['date']}] (YYYY-MM-DD or Enter to keep): ").strip()
             if date_input:
                 try:
                     item["date"] = date.fromisoformat(date_input)
@@ -176,8 +160,7 @@ def display_and_select(meals, diet_group, target_date):
 
 
 def sync_to_fitatu(selected_items):
-    """Build sync payload and POST to /diet-plan/{userId}/days."""
-    # Group items by date and slot
+    """Build sync payload and POST to Fitatu."""
     by_date = {}
     for item in selected_items:
         d = item["date"].isoformat()
@@ -187,7 +170,6 @@ def sync_to_fitatu(selected_items):
         by_date[d][slot].append(fitatu_item)
         print(f"  + {item['dish'][:50]} → {slot} ({d})")
 
-    # Build payload: { "2026-04-13": { "dietPlan": { "breakfast": { "items": [...] } } } }
     payload = {
         d: {"dietPlan": {slot: {"items": items} for slot, items in slots.items()}}
         for d, slots in by_date.items()
@@ -214,25 +196,22 @@ def main():
         with open(CONFIG_PATH) as f:
             cfg = json.load(f)
 
-    # Step 1: Fetch from Maczfit
     print(f"\n{'='*50}")
     print(f"  Maczfit → Fitatu Sync  |  {target_date}")
     print(f"{'='*50}")
 
     print("\n[Maczfit] Logging in...")
-    meals, diet_group = fetch_maczfit_meals(target_date, cfg)
+    meals = fetch_maczfit_meals(target_date, cfg)
     if not meals:
         print("No meals found.")
         return
 
-    # Step 2: Select meals
     print(f"\nMaczfit meals for {target_date}:\n")
-    selected = display_and_select(meals, diet_group, target_date)
+    selected = display_and_select(meals, target_date)
     if not selected:
         print("Nothing selected, exiting.")
         return
 
-    # Step 3: Login to Fitatu
     print("\n[Fitatu] Logging in...")
     fitatu_email = cfg.get("fitatu_email")
     fitatu_password = cfg.get("fitatu_password")
@@ -242,8 +221,6 @@ def main():
         fitatu_password = getpass("Fitatu password: ")
 
     fitatu_login(fitatu_email, fitatu_password)
-
-    # Step 4: Push to Fitatu
     sync_to_fitatu(selected)
 
 

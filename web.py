@@ -66,28 +66,24 @@ def get_maczfit(date_str):
         if not pkg:
             return jsonify({"meals": [], "error": "No package for this date"})
 
-        diet_group = pkg.get("Product", {}).get("Group",
-            pkg.get("Product", {}).get("ChooseMenuDietGroupName", "WYBÓR MENU"))
-        fat_pct, carb_pct, protein_pct = maczfit.DIET_MACROS.get(
-            diet_group, maczfit.DIET_MACROS["WYBÓR MENU"])
-
         raw_meals = maczfit.get_package_meals(pkg["Id"]).get("Meals", [])
         meals = []
         for meal in raw_meals:
             mi = meal.get("MenuItem", {})
             mt = mi.get("MealTypeId", meal.get("MealTypeId", 0))
-            kcal = mi.get("KcalSum", 0) or 0
-            macros = maczfit.estimate_macros(kcal, fat_pct, carb_pct, protein_pct)
+            macros = maczfit.get_nutrient_stats(mi["Id"])
+            if not macros:
+                continue
             meals.append({
                 "dish": mi.get("DishName", "?"),
                 "label": maczfit.MEAL_TYPES.get(mt, f"Meal {mt}"),
-                "kcal": round(kcal),
+                "kcal": macros["kcal"],
                 "protein": macros["protein"],
                 "fat": macros["fat"],
                 "carbs": macros["carbs"],
                 "default_slot": MEAL_SLOT_MAP.get(mt, "snack"),
             })
-        return jsonify({"meals": meals, "diet_group": diet_group})
+        return jsonify({"meals": meals})
     except Exception as e:
         return jsonify({"meals": [], "error": str(e)}), 500
 
