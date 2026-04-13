@@ -23,7 +23,7 @@ Calories and macros are **accurate per dish** — fetched from the Maczfit Nutri
 ## Quick start
 
 ```bash
-git clone https://github.com/<your-username>/maczfit.git
+git clone https://github.com/maciejjedrzejczyk/maczfit2fitatu.git
 cd maczfit
 cp config.json.example config.json
 chmod 600 config.json
