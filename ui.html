@@ -61,6 +61,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
     <div class="panel-body" id="maczfit-meals">
       <div class="loading">Loading...</div>
     </div>
+    <div class="day-total" id="maczfit-total"></div>
   </div>
 
   <!-- RIGHT: Fitatu -->
@@ -97,6 +98,7 @@ const today = new Date().toISOString().slice(0,10);
 const maczfitDate = document.getElementById('maczfit-date');
 const fitatuDate = document.getElementById('fitatu-date');
 const maczfitEl = document.getElementById('maczfit-meals');
+const maczfitTotalEl = document.getElementById('maczfit-total');
 const fitatuEl = document.getElementById('fitatu-slots');
 const totalEl = document.getElementById('fitatu-total');
 
@@ -118,12 +120,15 @@ function macroHtml(m) {
 // --- Maczfit ---
 async function loadMaczfit() {
   maczfitEl.innerHTML = '<div class="loading">Loading Maczfit meals...</div>';
+  maczfitTotalEl.textContent = '';
   try {
     const r = await fetch(`/api/maczfit/${maczfitDate.value}`);
     const data = await r.json();
     if (data.error && !data.meals.length) { maczfitEl.innerHTML = `<div class="loading">${data.error}</div>`; return; }
     maczfitEl.innerHTML = '';
+    let tK=0, tP=0, tF=0, tC=0;
     data.meals.forEach((m, i) => {
+      tK += m.kcal||0; tP += m.protein||0; tF += m.fat||0; tC += m.carbs||0;
       const card = document.createElement('div');
       card.className = 'meal-card';
       card.draggable = true;
@@ -135,6 +140,7 @@ async function loadMaczfit() {
       card.addEventListener('dragend', () => card.classList.remove('dragging'));
       maczfitEl.appendChild(card);
     });
+    maczfitTotalEl.textContent = `Day total: ${Math.round(tK)} kcal | P: ${tP.toFixed(1)}g | F: ${tF.toFixed(1)}g | C: ${tC.toFixed(1)}g`;
   } catch(e) { maczfitEl.innerHTML = `<div class="loading">Error: ${e.message}</div>`; }
 }
 
