@@ -205,7 +205,7 @@ async function deleteFitatuItem(slot, item) {
   try {
     const r = await fetch('/api/fitatu/delete', {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ date: fitatuDate.value, slot, itemId: item.id })
+      body: JSON.stringify({ date: fitatuDate.value, slot, itemId: item.id, foodType: item.foodType })
     });
     const data = await r.json();
     if (data.ok) {
@@ -224,7 +224,7 @@ async function moveFitatuItem(item, toSlot) {
     if (item.id) {
       const dr = await fetch('/api/fitatu/delete', {
         method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ date: fitatuDate.value, slot: fromSlot, itemId: item.id })
+        body: JSON.stringify({ date: fitatuDate.value, slot: fromSlot, itemId: item.id, foodType: item.foodType })
       });
       const dd = await dr.json();
       if (!dd.ok) { toast(dd.error || 'Move failed (delete step)', false); return; }

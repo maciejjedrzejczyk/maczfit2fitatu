@@ -140,10 +140,26 @@ def sync():
 def delete_item():
     try:
         ensure_fitatu()
-        data = request.json  # { date, slot, itemId }
+        data = request.json  # { date, slot, itemId, foodType }
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        payload = {
+            data["date"]: {
+                "dietPlan": {
+                    data["slot"]: {
+                        "items": [{
+                            "planDayDietItemId": data["itemId"],
+                            "foodType": data.get("foodType", "CUSTOM_ITEM"),
+                            "measureId": 1, "measureQuantity": 1,
+                            "source": "API",
+                            "deletedAt": now, "updatedAt": now,
+                        }]
+                    }
+                }
+            }
+        }
         uid = _state["fitatu_user_id"]
-        url = f"{FITATU_API}/diet-plan/{uid}/day/{data['date']}/{data['slot']}/{data['itemId']}"
-        r = requests.delete(url, headers=fitatu_headers())
+        url = f"{FITATU_API}/diet-plan/{uid}/days?synchronous=true"
+        r = requests.post(url, headers=fitatu_headers(), json=payload)
         r.raise_for_status()
         return jsonify({"ok": True})
     except Exception as e:
