@@ -164,11 +164,11 @@ def main():
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH) as f:
             cfg = json.load(f)
-        email = cfg.get("email")
-        password = cfg.get("password")
-    if not email or email == "your-email@example.com":
+        email = cfg.get("maczfit_email", cfg.get("email"))
+        password = cfg.get("maczfit_password", cfg.get("password"))
+    if not email or "example.com" in email or email.startswith("<"):
         email = input("Email: ")
-    if not password or password == "your-password":
+    if not password or "your-" in password or password.startswith("<"):
         password = getpass("Password: ")
 
     login(email, password)
