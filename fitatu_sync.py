@@ -70,14 +70,6 @@ def fitatu_get_planner_day(target_date):
     return r.json()
 
 
-def fitatu_sync_day(target_date, day_payload):
-    """POST sync payload to /diet-plan/{userId}/days."""
-    url = f"{FITATU_API}/diet-plan/{fitatu_user_id}/days?synchronous=true"
-    r = requests.post(url, headers=fitatu_auth_headers(), json=day_payload)
-    r.raise_for_status()
-    return r.json()
-
-
 def make_fitatu_item(dish_name, kcal, macros):
     """Create a Fitatu CUSTOM_ITEM for the sync payload."""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -202,7 +194,9 @@ def sync_to_fitatu(selected_items):
     }
 
     print(f"\n[Fitatu] Syncing {len(selected_items)} item(s)...")
-    fitatu_sync_day(target_date, payload)
+    url = f"{FITATU_API}/diet-plan/{fitatu_user_id}/days?synchronous=true"
+    r = requests.post(url, headers=fitatu_auth_headers(), json=payload)
+    r.raise_for_status()
     print("[Fitatu] Done! Check your Fitatu planner.")
 
 

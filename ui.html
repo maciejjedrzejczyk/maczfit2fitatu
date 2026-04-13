@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maczfit → Fitatu Sync</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a1a; }
+.app { display: flex; height: 100vh; gap: 12px; padding: 12px; }
+.panel { flex: 1; display: flex; flex-direction: column; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.1); overflow: hidden; }
+.panel-header { padding: 16px; background: linear-gradient(135deg, #4CAF50, #45a049); color: #fff; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.panel-header.fitatu { background: linear-gradient(135deg, #FF8700, #e67600); }
+.panel-header h2 { font-size: 18px; flex: 1; }
+.panel-header input[type=date] { padding: 6px 10px; border: none; border-radius: 6px; font-size: 14px; }
+.panel-body { flex: 1; overflow-y: auto; padding: 12px; }
+.meal-card { padding: 12px; margin-bottom: 8px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa; cursor: grab; transition: box-shadow .15s, transform .15s; }
+.meal-card:active { cursor: grabbing; }
+.meal-card.dragging { opacity: .5; transform: scale(.97); }
+.meal-card .dish { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.meal-card .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .5px; }
+.meal-card .macros { font-size: 12px; color: #555; margin-top: 4px; }
+.meal-card .macros span { margin-right: 8px; }
+.slot { margin-bottom: 12px; }
+.slot-header { font-size: 13px; font-weight: 600; text-transform: uppercase; color: #666; padding: 6px 0; border-bottom: 2px solid #eee; margin-bottom: 6px; display: flex; justify-content: space-between; }
+.slot-header .slot-total { font-weight: 400; color: #999; }
+.slot-items { min-height: 40px; padding: 4px; border-radius: 6px; transition: background .15s; }
+.slot-items.drag-over { background: #fff3e0; border: 2px dashed #FF8700; }
+.slot-items .meal-card { cursor: default; background: #fff; }
+.slot-items .meal-card.from-maczfit { border-left: 3px solid #4CAF50; }
+.empty-slot { color: #bbb; font-size: 13px; padding: 10px; text-align: center; font-style: italic; }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 10px 24px; border-radius: 8px; color: #fff; font-size: 14px; z-index: 100; animation: fadeInOut 2.5s; }
+.toast.ok { background: #4CAF50; }
+.toast.err { background: #f44336; }
+@keyframes fadeInOut { 0%{opacity:0;transform:translateX(-50%) translateY(10px)} 15%{opacity:1;transform:translateX(-50%) translateY(0)} 85%{opacity:1} 100%{opacity:0} }
+.loading { text-align: center; padding: 40px; color: #999; }
+.day-total { padding: 12px; border-top: 2px solid #eee; font-size: 13px; font-weight: 600; color: #333; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- LEFT: Maczfit -->
+  <div class="panel">
+    <div class="panel-header">
+      <h2>🥗 Maczfit</h2>
+      <input type="date" id="maczfit-date">
+    </div>
+    <div class="panel-body" id="maczfit-meals">
+      <div class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Fitatu -->
+  <div class="panel">
+    <div class="panel-header fitatu">
+      <h2>📊 Fitatu</h2>
+      <input type="date" id="fitatu-date">
+    </div>
+    <div class="panel-body" id="fitatu-slots"></div>
+    <div class="day-total" id="fitatu-total"></div>
+  </div>
+</div>
+
+<script>
+const SLOTS = ['breakfast','second_breakfast','lunch','dinner','snack','supper'];
+const SLOT_LABELS = {breakfast:'Breakfast',second_breakfast:'2nd Breakfast',lunch:'Lunch',dinner:'Dinner',snack:'Snack',supper:'Supper'};
+const today = new Date().toISOString().slice(0,10);
+
+const maczfitDate = document.getElementById('maczfit-date');
+const fitatuDate = document.getElementById('fitatu-date');
+const maczfitEl = document.getElementById('maczfit-meals');
+const fitatuEl = document.getElementById('fitatu-slots');
+const totalEl = document.getElementById('fitatu-total');
+
+maczfitDate.value = today;
+fitatuDate.value = today;
+
+function toast(msg, ok=true) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + (ok ? 'ok' : 'err');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+function macroHtml(m) {
+  return `<span>${m.kcal||m.energy||0} kcal</span><span>P: ${m.protein||0}g</span><span>F: ${m.fat||0}g</span><span>C: ${m.carbs||m.carbohydrate||0}g</span>`;
+}
+
+// --- Maczfit ---
+async function loadMaczfit() {
+  maczfitEl.innerHTML = '<div class="loading">Loading Maczfit meals...</div>';
+  try {
+    const r = await fetch(`/api/maczfit/${maczfitDate.value}`);
+    const data = await r.json();
+    if (data.error && !data.meals.length) { maczfitEl.innerHTML = `<div class="loading">${data.error}</div>`; return; }
+    maczfitEl.innerHTML = '';
+    data.meals.forEach((m, i) => {
+      const card = document.createElement('div');
+      card.className = 'meal-card';
+      card.draggable = true;
+      card.innerHTML = `<div class="label">${m.label}</div><div class="dish">${m.dish}</div><div class="macros">${macroHtml(m)}</div>`;
+      card.addEventListener('dragstart', e => {
+        card.classList.add('dragging');
+        e.dataTransfer.setData('application/json', JSON.stringify(m));
+      });
+      card.addEventListener('dragend', () => card.classList.remove('dragging'));
+      maczfitEl.appendChild(card);
+    });
+  } catch(e) { maczfitEl.innerHTML = `<div class="loading">Error: ${e.message}</div>`; }
+}
+
+// --- Fitatu ---
+let fitatuData = {};
+
+function renderFitatu() {
+  fitatuEl.innerHTML = '';
+  let totalKcal=0, totalP=0, totalF=0, totalC=0;
+  SLOTS.forEach(slot => {
+    const items = fitatuData[slot] || [];
+    const div = document.createElement('div');
+    div.className = 'slot';
+    const slotKcal = items.reduce((s,i) => s+(i.energy||i.kcal||0), 0);
+    totalKcal += slotKcal;
+    items.forEach(i => { totalP += i.protein||0; totalF += i.fat||0; totalC += i.carbohydrate||i.carbs||0; });
+    div.innerHTML = `<div class="slot-header"><span>${SLOT_LABELS[slot]}</span><span class="slot-total">${Math.round(slotKcal)} kcal</span></div>`;
+    const zone = document.createElement('div');
+    zone.className = 'slot-items';
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', async e => {
+      e.preventDefault(); zone.classList.remove('drag-over');
+      const meal = JSON.parse(e.dataTransfer.getData('application/json'));
+      await syncMeal(slot, meal);
+    });
+    if (!items.length) zone.innerHTML = '<div class="empty-slot">Drop meal here</div>';
+    items.forEach(it => {
+      const card = document.createElement('div');
+      card.className = 'meal-card' + (it._fromMaczfit ? ' from-maczfit' : '');
+      card.innerHTML = `<div class="dish">${it.name||it.dish}</div><div class="macros">${macroHtml({kcal:it.energy,protein:it.protein,fat:it.fat,carbs:it.carbohydrate})}</div>`;
+      zone.appendChild(card);
+    });
+    div.appendChild(zone);
+    fitatuEl.appendChild(div);
+  });
+  totalEl.textContent = `Day total: ${Math.round(totalKcal)} kcal | P: ${totalP.toFixed(1)}g | F: ${totalF.toFixed(1)}g | C: ${totalC.toFixed(1)}g`;
+}
+
+async function loadFitatu() {
+  fitatuEl.innerHTML = '<div class="loading">Loading Fitatu planner...</div>';
+  try {
+    const r = await fetch(`/api/fitatu/${fitatuDate.value}`);
+    const data = await r.json();
+    fitatuData = data.slots || {};
+    renderFitatu();
+  } catch(e) { fitatuEl.innerHTML = `<div class="loading">Error: ${e.message}</div>`; }
+}
+
+async function syncMeal(slot, meal) {
+  try {
+    const r = await fetch('/api/sync', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ date: fitatuDate.value, slot, meal })
+    });
+    const data = await r.json();
+    if (data.ok) {
+      if (!fitatuData[slot]) fitatuData[slot] = [];
+      fitatuData[slot].push({
+        name: meal.dish, energy: meal.kcal, protein: meal.protein,
+        fat: meal.fat, carbohydrate: meal.carbs, _fromMaczfit: true
+      });
+      renderFitatu();
+      toast(`✓ ${meal.dish.slice(0,40)} → ${SLOT_LABELS[slot]}`);
+    } else { toast(data.error || 'Sync failed', false); }
+  } catch(e) { toast(e.message, false); }
+}
+
+maczfitDate.addEventListener('change', loadMaczfit);
+fitatuDate.addEventListener('change', loadFitatu);
+loadMaczfit();
+loadFitatu();
+</script>
+</body>
+</html>
