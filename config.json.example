@@ -4,5 +4,8 @@
   "fitatu_email": "your-fitatu-email@example.com",
   "fitatu_password": "your-fitatu-password",
   "fitatu_api_key": "your-fitatu-api-key",
-  "fitatu_api_secret": "your-fitatu-api-secret"
+  "fitatu_api_secret": "your-fitatu-api-secret",
+  "ui_password": "change-me",
+  "ui_tls": true,
+  "ui_port": 5555
 }

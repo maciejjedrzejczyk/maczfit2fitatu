@@ -7,8 +7,13 @@ VENV=".venv"
 if [ ! -d "$VENV" ]; then
     echo "Creating virtual environment..."
     python3 -m venv "$VENV"
+fi
+
+# Reinstall deps if requirements.txt is newer than the venv marker
+MARKER="$VENV/.deps_installed"
+if [ ! -f "$MARKER" ] || [ requirements.txt -nt "$MARKER" ]; then
     "$VENV/bin/pip" install --quiet -r requirements.txt
-    echo "Setup complete."
+    touch "$MARKER"
 fi
 
 SCRIPT="${1:-}"
@@ -24,14 +29,14 @@ case "$SCRIPT" in
         echo "Commands:"
         echo "  meals [YYYY-MM-DD]  Show Maczfit meals for a date"
         echo "  sync  [YYYY-MM-DD]  Sync Maczfit meals → Fitatu planner"
-        echo "  ui                  Launch drag-and-drop web UI"
+        echo "  ui                  Launch drag-and-drop web UI (HTTPS)"
         echo ""
         echo "Examples:"
         echo "  ./run.sh meals              # today's meals"
         echo "  ./run.sh meals 2026-04-09   # specific date"
         echo "  ./run.sh sync               # sync today to Fitatu"
         echo "  ./run.sh sync 2026-04-09    # sync specific date"
-        echo "  ./run.sh ui                 # open web UI at localhost:5555"
+        echo "  ./run.sh ui                 # web UI at https://localhost:5555"
         exit 1
         ;;
 esac

@@ -21,7 +21,9 @@ services:
     build: .
     command: ["web.py"]
     ports:
+      - "5554:5554"
       - "5555:5555"
     volumes:
       - ./config.json:/app/config.json:ro
+      - ./certs:/app/certs
     profiles: [ui]

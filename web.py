@@ -2,11 +2,15 @@
 
 import json
 import os
+import secrets
+import ssl
+import subprocess
 import uuid
 import base64
 import requests
 from datetime import date, datetime
-from flask import Flask, jsonify, request, send_file
+from functools import wraps
+from flask import Flask, jsonify, request, send_file, session, redirect, url_for
 
 import maczfit_meals as maczfit
 from fitatu_sync import (
@@ -19,6 +23,45 @@ CONFIG_PATH = maczfit.CONFIG_PATH
 
 # Session state (single-user tool)
 _state = {"maczfit_logged_in": False, "fitatu_token": None, "fitatu_user_id": None, "cfg": {}}
+
+
+# --- Authentication ---
+
+def _ui_password():
+    return cfg().get("ui_password", "")
+
+
+def login_required(f):
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if _ui_password() and not session.get("authenticated"):
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Unauthorized"}), 401
+            return redirect(url_for("login_page"))
+        return f(*args, **kwargs)
+    return wrapped
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login_page():
+    if request.method == "POST":
+        if request.form.get("password") == _ui_password():
+            session["authenticated"] = True
+            return redirect(url_for("index"))
+        return LOGIN_HTML.replace("<!--ERR-->", '<p style="color:#f44336;margin-top:8px">Wrong password</p>'), 401
+    return LOGIN_HTML
+
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login — Maczfit → Fitatu</title>
+<style>body{font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;background:#f0f2f5;margin:0}
+.box{background:#fff;padding:32px;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.1);width:320px;text-align:center}
+h2{margin-bottom:20px;font-size:20px}input{width:100%;padding:10px;border:1px solid #ddd;border-radius:6px;font-size:14px;margin-bottom:12px;box-sizing:border-box}
+button{width:100%;padding:10px;border:none;border-radius:6px;background:#4CAF50;color:#fff;font-size:14px;cursor:pointer}button:hover{background:#45a049}</style>
+</head><body><div class="box"><h2>🥗 Maczfit → Fitatu</h2>
+<form method="POST"><input type="password" name="password" placeholder="Password" autofocus required>
+<button type="submit">Log in</button></form><!--ERR--></div></body></html>"""
 
 
 def cfg():
@@ -54,11 +97,13 @@ def fitatu_headers():
 
 
 @app.route("/")
+@login_required
 def index():
     return send_file("ui.html")
 
 
 @app.route("/api/maczfit/<date_str>")
+@login_required
 def get_maczfit(date_str):
     try:
         target = date.fromisoformat(date_str)
@@ -90,6 +135,7 @@ def get_maczfit(date_str):
 
 
 @app.route("/api/fitatu/<date_str>")
+@login_required
 def get_fitatu(date_str):
     try:
         target = date.fromisoformat(date_str)
@@ -115,6 +161,7 @@ def get_fitatu(date_str):
 
 
 @app.route("/api/sync", methods=["POST"])
+@login_required
 def sync():
     try:
         ensure_fitatu()
@@ -134,6 +181,7 @@ def sync():
 
 
 @app.route("/api/fitatu/delete", methods=["POST"])
+@login_required
 def delete_item():
     try:
         ensure_fitatu()
@@ -164,13 +212,16 @@ def delete_item():
 
 
 @app.route("/api/fitatu/move", methods=["POST"])
+@login_required
 def move_item():
-    """Move item between slots: delete from old + add to new in one sync call."""
+    """Move item between slots/dates: delete from old + add to new in one sync call."""
     try:
         ensure_fitatu()
-        data = request.json  # { date, fromSlot, toSlot, item }
+        data = request.json  # { fromDate, toDate, fromSlot, toSlot, item }
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item = data["item"]
+        from_date = data.get("fromDate", data.get("date"))
+        to_date = data.get("toDate", from_date)
 
         # Build delete entry for old slot
         del_item = {
@@ -191,14 +242,16 @@ def move_item():
                   "carbs": item.get("carbohydrate", 0)}
         add_item = make_fitatu_item(item.get("name", "?"), item.get("energy", 0), macros)
 
-        payload = {
-            data["date"]: {
-                "dietPlan": {
-                    data["fromSlot"]: {"items": [del_item]},
-                    data["toSlot"]: {"items": [add_item]},
-                }
-            }
-        }
+        payload = {}
+        if from_date == to_date:
+            payload[from_date] = {"dietPlan": {
+                data["fromSlot"]: {"items": [del_item]},
+                data["toSlot"]: {"items": [add_item]},
+            }}
+        else:
+            payload[from_date] = {"dietPlan": {data["fromSlot"]: {"items": [del_item]}}}
+            payload[to_date] = {"dietPlan": {data["toSlot"]: {"items": [add_item]}}}
+
         uid = _state["fitatu_user_id"]
         url = f"{FITATU_API}/diet-plan/{uid}/days?synchronous=true"
         r = requests.post(url, headers=fitatu_headers(), json=payload)
@@ -209,6 +262,7 @@ def move_item():
 
 
 @app.route("/api/fitatu/edit", methods=["POST"])
+@login_required
 def edit_item():
     """Edit item: delete old + add updated in one sync call."""
     try:
@@ -248,5 +302,78 @@ def edit_item():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _ensure_certs(cert_dir=None):
+    """Generate self-signed TLS cert if none configured."""
+    cert_dir = cert_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs")
+    cert = os.path.join(cert_dir, "cert.pem")
+    key = os.path.join(cert_dir, "key.pem")
+    if os.path.exists(cert) and os.path.exists(key):
+        return cert, key
+    os.makedirs(cert_dir, exist_ok=True)
+    subprocess.run([
+        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", key, "-out", cert, "-days", "365",
+        "-subj", "/CN=maczfit-ui",
+    ], check=True, capture_output=True)
+    print(f"[TLS] Generated self-signed cert in {cert_dir}/")
+    return cert, key
+
+
+def _run_http_redirect(https_port):
+    """Run a tiny HTTP server that redirects everything to HTTPS."""
+    import threading
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+
+    http_port = https_port - 1  # e.g. 5554 → 5555
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            host = self.headers.get("Host", "").split(":")[0] or "localhost"
+            self.send_response(301)
+            self.send_header("Location", f"https://{host}:{https_port}{self.path}")
+            self.end_headers()
+        do_POST = do_HEAD = do_GET
+        def log_message(self, *args):
+            pass  # silent
+
+    srv = HTTPServer(("0.0.0.0", http_port), RedirectHandler)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    print(f"[UI] HTTP redirect: http://0.0.0.0:{http_port} → https://…:{https_port}")
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", debug=True, port=5555)
+    c = cfg()
+    app.secret_key = c.get("ui_secret_key", secrets.token_hex(32))
+    port = int(c.get("ui_port", 5555))
+    use_tls = c.get("ui_tls", True)
+
+    ssl_ctx = None
+    if use_tls:
+        cert, key = _ensure_certs(c.get("ui_cert_dir"))
+        ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_ctx.load_cert_chain(cert, key)
+        _run_http_redirect(port)
+
+    try:
+        import gunicorn  # noqa: F401
+        from gunicorn.app.base import BaseApplication
+
+        class GunicornApp(BaseApplication):
+            def load_config(self):
+                self.cfg.set("bind", f"0.0.0.0:{port}")
+                self.cfg.set("workers", 1)
+                if ssl_ctx:
+                    self.cfg.set("certfile", cert)
+                    self.cfg.set("keyfile", key)
+
+            def load(self):
+                return app
+
+        print(f"[UI] Starting gunicorn on {'https' if use_tls else 'http'}://0.0.0.0:{port}")
+        GunicornApp().run()
+    except ImportError:
+        proto = "https" if use_tls else "http"
+        print(f"[UI] Starting Flask dev server on {proto}://0.0.0.0:{port}")
+        print("[UI] Install gunicorn for production use: pip install gunicorn")
+        app.run(host="0.0.0.0", port=port, ssl_context=ssl_ctx)
